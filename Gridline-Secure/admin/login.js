@@ -1,0 +1,19 @@
+
+/* Add Supabase project URL + publishable/anon key after creating your project. Never use service_role here. */
+const SUPABASE_URL="https://kpjpbovphdatqmfifxes.supabase.co",SUPABASE_ANON_KEY="sb_publishable_-KR_19JIiGRRRRSrvzEf_g_mlH6cwNy";
+const $=id=>document.getElementById(id),views=["signInView","enrollView","verifyView"];let client,factorId=null,fails=0,lockUntil=0;const DENIED="Incorrect email or password, or this account is not approved.";
+function show(id){views.forEach(v=>$(v).classList.toggle("hide",v!==id));notice("")}
+function notice(t,ok=false){const n=$("notice");n.textContent=t;n.className="notice show"+(ok?" ok":"")}
+function ready(){if(SUPABASE_URL.startsWith("YOUR_")||SUPABASE_ANON_KEY.startsWith("YOUR_")){notice("The login interface is ready. Add your Supabase project URL and publishable/anon key after creating your Supabase project.");return false}if(!window.supabase){notice("Supabase could not load. Check your internet connection.");return false}client??=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:false}});return true}
+function busy(b,on){b.disabled=on;b.dataset.label??=b.textContent;b.textContent=on?"Please wait…":b.dataset.label}
+async function adminAllowed(){const {data,error}=await client.rpc("is_admin_account");if(error)throw error;return data===true}
+async function gate(){const {data:{session},error}=await client.auth.getSession();if(error)throw error;if(!session){show("signInView");return}
+if(!(await adminAllowed())){await client.auth.signOut();show("signInView");notice(DENIED);return}
+const {data:aal,error:ae}=await client.auth.mfa.getAuthenticatorAssuranceLevel();if(ae)throw ae;if(aal.currentLevel==="aal2"){window.location.replace("./dashboard.html");return}
+const {data:f,error:fe}=await client.auth.mfa.listFactors();if(fe)throw fe;const verified=(f.totp||[]).find(x=>x.status==="verified");if(verified){factorId=verified.id;show("verifyView");return}
+for(const p of (f.all||[]).filter(x=>x.factor_type==="totp"&&x.status==="unverified")){await client.auth.mfa.unenroll({factorId:p.id})}
+const {data:e,error:ee}=await client.auth.mfa.enroll({factorType:"totp",friendlyName:"Gridline Digital Admin"});if(ee)throw ee;factorId=e.id;const qr=String(e.totp.qr_code||"");if(!qr.startsWith("data:image/svg+xml"))throw new Error("Could not display the QR code. Please try again.");$("qrCode").src=qr;$("secretKey").textContent=e.totp.secret;show("enrollView")}
+$("signInForm").onsubmit=async e=>{e.preventDefault();if(!ready())return;if(Date.now()<lockUntil){notice("Too many attempts. Please wait "+Math.ceil((lockUntil-Date.now())/1000)+" seconds.");return}const b=$("signInButton");busy(b,true);try{const {error}=await client.auth.signInWithPassword({email:$("email").value.trim(),password:$("password").value});if(error)throw error;fails=0;await gate()}catch(x){fails++;lockUntil=Date.now()+Math.min(60000,1000*2**fails);notice(DENIED)}finally{busy(b,false)}};
+$("enrollForm").onsubmit=async e=>{e.preventDefault();if(!ready()||!factorId)return;const b=$("activateButton");busy(b,true);try{const {error}=await client.auth.mfa.challengeAndVerify({factorId,code:$("enrollCode").value.trim()});if(error)throw error;await gate()}catch(x){notice(x.message||"Code not verified. Try the newest code.")}finally{busy(b,false)}};
+$("verifyForm").onsubmit=async e=>{e.preventDefault();if(!ready()||!factorId)return;const b=$("verifyButton");busy(b,true);try{const {error}=await client.auth.mfa.challengeAndVerify({factorId,code:$("verifyCode").value.trim()});if(error)throw error;await gate()}catch(x){notice(x.message||"Code not verified. Try the newest code.")}finally{busy(b,false)}};
+if(ready())client.auth.onAuthStateChange((_event,session)=>{if(!session)show("signInView")});
